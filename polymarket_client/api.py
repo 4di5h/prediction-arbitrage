@@ -233,11 +233,13 @@ class PolymarketClient(BasePolymarketClient):
             params.setdefault("closed", "false")
             params.setdefault("order", "volume24hr")
             params.setdefault("ascending", "false")
+            params["active"] = "true"
+            params["accepting_orders"] = "true"   # only markets with live orderbooks
             
             all_markets = []
             offset = 0
             limit = 100  # Gamma API max per request
-            max_markets = 5000  # Get up to 5000 markets!
+            max_markets = 500  # Get up to 500 markets!
             
             logger.info("Fetching ALL available markets from Polymarket...")
             
@@ -343,11 +345,29 @@ class PolymarketClient(BasePolymarketClient):
                     yes_token_id = token_ids[0].strip() if len(token_ids) > 0 else ""
                     no_token_id = token_ids[1].strip() if len(token_ids) > 1 else ""
             
-            # Parse outcomes - JSON string like '["Yes", "No"]'
-            outcomes_str = data.get("outcomes", "")
-            # Parse outcome prices - JSON string like '[0.65, 0.35]'
-            outcome_prices_str = data.get("outcomePrices", "")
-            
+            # Parse Gamma mid-prices — used as fallback when CLOB returns empty
+            gamma_yes_price = None
+            gamma_no_price = None
+            try:
+                outcome_prices_str = data.get("outcomePrices", "")
+                if outcome_prices_str:
+                    prices = json.loads(outcome_prices_str)
+                    if isinstance(prices, list) and len(prices) >= 2:
+                        gamma_yes_price = float(prices[0])
+                        gamma_no_price = float(prices[1])
+            except Exception:
+                pass
+
+            # Also use bestBid/bestAsk from Gamma if outcomePrices missing
+            if gamma_yes_price is None:
+                best_bid = data.get("bestBid")
+                best_ask = data.get("bestAsk")
+                if best_bid is not None and best_ask is not None:
+                    gamma_yes_price = (float(best_bid) + float(best_ask)) / 2
+                    gamma_no_price = 1.0 - gamma_yes_price
+
+            end_date_str = data.get("endDate") or data.get("endDateIso")
+
             return Market(
                 market_id=market_id,
                 condition_id=condition_id,
@@ -361,6 +381,9 @@ class PolymarketClient(BasePolymarketClient):
                 volume_24h=float(data.get("volume24hr") or data.get("volume24hrClob") or 0),
                 liquidity=float(data.get("liquidityNum") or data.get("liquidityClob") or 0),
                 category=data.get("category", "") or "",
+                end_date_str=end_date_str,
+                gamma_yes_price=gamma_yes_price,
+                gamma_no_price=gamma_no_price,
             )
         except Exception as e:
             logger.warning(f"Failed to parse market: {e}")
@@ -522,9 +545,19 @@ class PolymarketClient(BasePolymarketClient):
                 asks=OrderBookSide(levels=asks),
             )
             
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                # Market exists in Gamma but no active CLOB book — silent skip
+                pass
+            else:
+                logger.warning(f"Failed to fetch orderbook for token {token_id}: {e}")
+            return TokenOrderBook(
+                token_type=token_type,
+                bids=OrderBookSide(levels=[]),
+                asks=OrderBookSide(levels=[]),
+            )
         except Exception as e:
             logger.warning(f"Failed to fetch orderbook for token {token_id}: {e}")
-            # Return empty book
             return TokenOrderBook(
                 token_type=token_type,
                 bids=OrderBookSide(levels=[]),
@@ -637,21 +670,52 @@ class PolymarketClient(BasePolymarketClient):
                     for market_id in request_batch:
                         try:
                             yes_token, no_token = market_tokens[market_id]
-                            
+
                             # Fetch REAL order books from CLOB API
                             yes_book = await self._fetch_token_orderbook(yes_token, TokenType.YES)
                             no_book = await self._fetch_token_orderbook(no_token, TokenType.NO)
-                            
-                            orderbook = OrderBook(
-                                market_id=market_id,
-                                yes=yes_book,
-                                no=no_book,
-                                timestamp=datetime.utcnow(),
-                            )
-                            
-                            yield (market_id, orderbook)
+
+                            # ── Gamma fallback ──────────────────────────────
+                            # If CLOB returned empty (404 or no liquidity),
+                            # use the Gamma mid-price so the arb engine can
+                            # still evaluate the market.
+                            source = "clob"
+                            market = self._markets_cache.get(market_id)
+
+                            if market and not yes_book.bids.levels and not yes_book.asks.levels:
+                                if market.gamma_yes_price is not None:
+                                    p = market.gamma_yes_price
+                                    yes_book = TokenOrderBook(
+                                        token_type=TokenType.YES,
+                                        bids=OrderBookSide(levels=[PriceLevel(price=round(p - 0.005, 3), size=500)]),
+                                        asks=OrderBookSide(levels=[PriceLevel(price=round(p + 0.005, 3), size=500)]),
+                                    )
+                                    source = "gamma"
+
+                            if market and not no_book.bids.levels and not no_book.asks.levels:
+                                if market.gamma_no_price is not None:
+                                    p = market.gamma_no_price
+                                    no_book = TokenOrderBook(
+                                        token_type=TokenType.NO,
+                                        bids=OrderBookSide(levels=[PriceLevel(price=round(p - 0.005, 3), size=500)]),
+                                        asks=OrderBookSide(levels=[PriceLevel(price=round(p + 0.005, 3), size=500)]),
+                                    )
+                                    source = "gamma"
+                            # ────────────────────────────────────────────────
+
+                            # Only yield if we have at least some price data
+                            if yes_book.bids.levels or yes_book.asks.levels:
+                                orderbook = OrderBook(
+                                    market_id=market_id,
+                                    yes=yes_book,
+                                    no=no_book,
+                                    timestamp=datetime.utcnow(),
+                                    source=source,
+                                )
+                                yield (market_id, orderbook)
+
                             await asyncio.sleep(request_delay)
-                            
+
                         except Exception as e:
                             # Silently skip errors - don't spam logs
                             continue

@@ -154,6 +154,17 @@ class TradingBotWithDashboard:
             min_order_size=self.config.trading.min_order_size,
             max_order_size=self.config.trading.max_order_size,
         ))
+
+        # Initialize dashboard integration
+        self.dashboard_integration = DashboardIntegration(
+            data_feed=self.data_feed,
+            arb_engine=self.arb_engine,
+            execution_engine=self.execution_engine,
+            risk_manager=self.risk_manager,
+            portfolio=self.portfolio,
+            mode="dry_run" if self.config.is_dry_run else "live",
+        )
+        await self.dashboard_integration.start()
         
         # Initialize data feed
         market_ids = self.config.trading.markets.copy()
@@ -165,17 +176,6 @@ class TradingBotWithDashboard:
             config=self.config,
         )
         await self.data_feed.start()
-        
-        # Initialize dashboard integration
-        self.dashboard_integration = DashboardIntegration(
-            data_feed=self.data_feed,
-            arb_engine=self.arb_engine,
-            execution_engine=self.execution_engine,
-            risk_manager=self.risk_manager,
-            portfolio=self.portfolio,
-            mode="dry_run" if self.config.is_dry_run else "live",
-        )
-        await self.dashboard_integration.start()
         
         # Start fill simulation for dry run
         if self.config.is_dry_run and self.config.mode.simulate_fills:

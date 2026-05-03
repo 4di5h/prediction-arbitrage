@@ -28,7 +28,7 @@ trading:
   markets: []
   
   # Arbitrage settings
-  min_edge: 0.01           # 1% edge required for bundle arbitrage
+  min_edge: 0.005           # 0.5% edge required for bundle arbitrage
   bundle_arb_enabled: true
   
   # Market-making settings
@@ -81,14 +81,14 @@ mode:
   data_mode: "real"  # <-- CHANGE TO "simulation" FOR DEMOS
   
   # Cross-platform arbitrage (Polymarket + Kalshi)
-  cross_platform_enabled: true    # Enable cross-platform arbitrage detection
-  kalshi_enabled: true            # Enable Kalshi market monitoring
+  cross_platform_enabled: false    # Enable cross-platform arbitrage detection
+  kalshi_enabled: false            # Enable Kalshi market monitoring
   min_match_similarity: 0.6       # Minimum similarity score for market matching (0-1)
   
   # Dry run settings
   dry_run_initial_balance: 10000
   simulate_fills: true
-  fill_probability: 0.8          # Probability of order being filled in dry run
+  fill_probability: 0.4          # Probability of order being filled in dry run
 
 logging:
   # Log levels: DEBUG, INFO, WARNING, ERROR, CRITICAL
