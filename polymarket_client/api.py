@@ -206,7 +206,9 @@ class PolymarketClient(BasePolymarketClient):
                 response.raise_for_status()
                 return response.json()
             except httpx.HTTPStatusError as e:
-                logger.warning(f"HTTP error {e.response.status_code} on {url}: {e}")
+                if e.response.status_code != 404:
+                    logger.warning(f"HTTP error {e.response.status_code} on {url}: {e}")
+            
                 if e.response.status_code >= 500:
                     # Retry on server errors
                     if attempt < self.max_retries - 1:

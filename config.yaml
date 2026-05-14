@@ -34,7 +34,7 @@ trading:
   # Market-making settings
   min_spread: 0.05         # 5c spread to act as market maker
   tick_size: 0.01          # Minimum price increment
-  mm_enabled: false        # Disabled for real data (markets too efficient)
+  mm_enabled: true        # Disabled for real data (markets too efficient)
   
   # Order sizing - SMALL for $50 budget
   default_order_size: 5    # $5 per order
@@ -78,7 +78,7 @@ mode:
   # Data mode: "real" or "simulation"
   # - "real": Fetch actual order books from Polymarket CLOB API
   # - "simulation": Generate fake data with opportunities (for demos/screenshots)
-  data_mode: "real"  # <-- CHANGE TO "simulation" FOR DEMOS
+  data_mode: "simulation"  # <-- CHANGE TO "simulation" FOR DEMOS
   
   # Cross-platform arbitrage (Polymarket + Kalshi)
   cross_platform_enabled: false    # Enable cross-platform arbitrage detection
